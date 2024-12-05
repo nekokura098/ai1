@@ -91,7 +91,7 @@ class TransformerModel(nn.Module):
 
 
 # Train function
-def train(model, X_train, y_train, epochs=5, batch_size=32, learning_rate=0.001, save_path="model_checkpoint.pth"):
+def train(model, X_train, y_train, epochs=5, batch_size=64, learning_rate=0.001, save_path="model_checkpoint.pth"):
     model.train()
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
@@ -163,7 +163,7 @@ def evaluate_model(model, X_test, y_test, scaler):
         return pred_rescaled, mse_loss, mae_loss
 
 def main():
-    sequence_length = 60
+    sequence_length = 120
     folder_path = r"data"
     final_model_path = "final_model.pth"  # Path to save the final model
     
@@ -188,7 +188,7 @@ def main():
             input_dim=len(required_columns),
             n_heads=8,
             hidden_dim=64,
-            n_layers=3,
+            n_layers=4,
             output_dim=1,
             sequence_length=sequence_length
         ).to(device)
