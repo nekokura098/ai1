@@ -165,7 +165,8 @@ def evaluate_model(model, X_test, y_test, scaler):
 def main():
     sequence_length = 120
     folder_path = r"data"
-    final_model_path = "final_model.pth"  # Path to save the final model
+    final_model_path = "final_model2.pth"  # Path to save the final model
+    checkpoint_path = "model_checkpoint2.pth"  # Checkpoint for continuing training
     
     # Determine device (use GPU if available, otherwise use CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -183,34 +184,11 @@ def main():
             'Stochastic_K', 'Stochastic_D', 'symbol', 'timeframe'
         ]
         
-        # Initialize model
-        model = TransformerModel(
-            input_dim=len(required_columns),
-            n_heads=8,
-            hidden_dim=64,
-            n_layers=4,
-            output_dim=1,
-            sequence_length=sequence_length
-        ).to(device)
-        
-        checkpoint_path = "model_checkpoint.pth"
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
-        start_epoch = 0
-        
-        # Load model if checkpoint exists
-        if os.path.exists(checkpoint_path):
-            print("Checkpoint found, loading model...")
-            model, optimizer, start_epoch = load_model(checkpoint_path, model, optimizer)
-        
-        # Lists to store overall performance metrics
-        all_mse = []
-        all_mae = []
-        
-        # Process each file individually
-        for file in tqdm(csv_files, desc="Processing files", unit="file"):
-            print(f"Processing file: {file}")
+        # Combine all CSV files into a single DataFrame
+        combined_data = []
+        for file in csv_files:
+            print(f"Loading file: {file}")
             data = pd.read_csv(file)
-            
             if data.empty:
                 print(f"Skipping empty file: {file}")
                 continue
@@ -221,56 +199,77 @@ def main():
                 print(f"Skipping file {file} due to missing columns: {missing_columns}")
                 continue
             
-            # Scale features
-            features = data[required_columns]
-            scaler = MinMaxScaler()
-            features_scaled = scaler.fit_transform(features)
-            target = data['close'].values
-            
-            # Create sequences
-            def create_sequences(data, target, seq_length):
-                X, y = [], []
-                for i in range(len(data) - seq_length):
-                    X.append(data[i:i + seq_length])
-                    y.append(target[i + seq_length])
-                return np.array(X), np.array(y)
-            
-            X_data, y_data = create_sequences(features_scaled, target, sequence_length)
-            
-            # Split data
-            split_ratio = 0.8
-            split_index = int(len(X_data) * split_ratio)
-            X_train, X_test = X_data[:split_index], X_data[split_index:]
-            y_train, y_test = y_data[:split_index], y_data[split_index:]
-            
-            # Convert to tensors
-            X_train = torch.tensor(X_train, dtype=torch.float16).to(device)
-            X_test = torch.tensor(X_test, dtype=torch.float16).to(device)
-            y_train = torch.tensor(y_train, dtype=torch.float16).to(device)
-            y_test = torch.tensor(y_test, dtype=torch.float16).to(device)
-            
-            # Train model on the current file
-            train(model, X_train, y_train, epochs=50, save_path=checkpoint_path)
-            
-            # Evaluate model
-            predictions, mse, mae = evaluate_model(model, X_test, y_test, scaler)
-            print(f"File: {file} - MSE: {mse}, MAE: {mae}")
-            
-            # Store performance metrics
-            all_mse.append(mse)
-            all_mae.append(mae)
+            combined_data.append(data)
         
-        # Calculate and print overall performance
-        print("\nOverall Performance:")
-        print(f"Average MSE: {np.mean(all_mse)}")
-        print(f"Average MAE: {np.mean(all_mae)}")
+        if not combined_data:
+            print("No valid data to process.")
+            return
         
-        # Save the final model
+        # Concatenate all data
+        combined_data = pd.concat(combined_data, ignore_index=True)
+        print(f"Combined data shape: {combined_data.shape}")
+        
+        # Scale features
+        features = combined_data[required_columns]
+        scaler = MinMaxScaler()
+        features_scaled = scaler.fit_transform(features)
+        target = combined_data['close'].values
+        
+        # Create sequences
+        def create_sequences(data, target, seq_length):
+            X, y = [], []
+            for i in range(len(data) - seq_length):
+                X.append(data[i:i + seq_length])
+                y.append(target[i + seq_length])
+            return np.array(X), np.array(y)
+        
+        X_data, y_data = create_sequences(features_scaled, target, sequence_length)
+        
+        # Split data
+        split_ratio = 0.8
+        split_index = int(len(X_data) * split_ratio)
+        X_train, X_test = X_data[:split_index], X_data[split_index:]
+        y_train, y_test = y_data[:split_index], y_data[split_index:]
+        
+        # Convert to tensors
+        X_train = torch.tensor(X_train, dtype=torch.float32).to(device)
+        X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
+        y_train = torch.tensor(y_train, dtype=torch.float32).to(device)
+        y_test = torch.tensor(y_test, dtype=torch.float32).to(device)
+        
+        # Initialize model
+        model = TransformerModel(
+            input_dim=len(required_columns),
+            n_heads=8,
+            hidden_dim=64,
+            n_layers=4,
+            output_dim=1,
+            sequence_length=sequence_length
+        ).to(device)
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+        start_epoch = 0
+        
+        # Load model if checkpoint exists
+        if os.path.exists(checkpoint_path):
+            print("Checkpoint found, loading model for further training...")
+            model, optimizer, start_epoch = load_model(checkpoint_path, model, optimizer)
+        else:
+            print("No checkpoint found. Starting training from scratch.")
+        
+        # Train model on combined data
+        train(model, X_train, y_train, epochs=50, save_path=checkpoint_path)
+        
+        # Evaluate model
+        predictions, mse, mae = evaluate_model(model, X_test, y_test, scaler)
+        print(f"\nEvaluation - MSE: {mse}, MAE: {mae}")
+        
+        # Save the final model (updated)
         torch.save({
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-            'avg_mse': np.mean(all_mse),
-            'avg_mae': np.mean(all_mae)
+            'mse': mse,
+            'mae': mae
         }, final_model_path)
         
         print(f"\nFinal model saved to {final_model_path}")
@@ -278,7 +277,6 @@ def main():
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         raise
-
 
 if __name__ == "__main__":
     main()
